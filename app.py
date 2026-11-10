@@ -6,7 +6,6 @@ import base64
 import os
 import random
 
-# Streamlit Page Config (단일 모바일 화면 설정)
 st.set_page_config(
     page_title="하루담 (HARUDAM)",
     page_icon="🏡",
@@ -62,6 +61,16 @@ def init_db():
             FOREIGN KEY (member_id) REFERENCES members (id)
         )
     """)
+    
+    # DB 컬럼 자동 마이그레이션 (OperationalError 완벽 방지)
+    c.execute("PRAGMA table_info(answers)")
+    columns = [col[1] for col in c.fetchall()]
+    if "emotion" not in columns:
+        try:
+            c.execute("ALTER TABLE answers ADD COLUMN emotion TEXT DEFAULT '😊'")
+        except Exception:
+            pass
+
     c.execute("""
         CREATE TABLE IF NOT EXISTS mood_signals (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -144,6 +153,22 @@ CHARACTERS = [
     {"id": 15, "name": "별빛 아기부엉이 오울", "type": "지혜 아기부엉", "desc": "동그란 안경 모자를 쓰고 밤마다 안락한 쉼터를 전해주는 부엉이.", "icon": "🦉", "bg_color": "#F1F3F5", "accent": "#ADB5BD"}
 ]
 
+# 12가지 감정 옵션 목록
+EMOTION_OPTIONS = [
+    "😊 행복해요",
+    "🥰 사랑스러워요",
+    "😌 편안해요",
+    "🥹 감동이에요",
+    "💪 힘내요",
+    "🤣 신나요/웃겨요",
+    "☕ 피곤해요/지쳐요",
+    "🥺 위로가 필요해요",
+    "😟 걱정돼요",
+    "🤔 생각이 많아요",
+    "😡 속상해요",
+    "✨ 설레요"
+]
+
 def get_character_from_blood_types(blood_types):
     sorted_bt = sorted([bt.upper().strip() for bt in blood_types])
     combined_str = "".join(sorted_bt)
@@ -163,7 +188,6 @@ DAILY_QUESTIONS = [
 def get_today_question():
     return DAILY_QUESTIONS[datetime.date.today().toordinal() % len(DAILY_QUESTIONS)]
 
-# 한 화면(Single Screen)에 딱 맞춰 수직 여백 및 요소 크기를 압축한 CSS
 st.markdown("""
 <style>
     @import url('https://fonts.googleapis.com/css2?family=Gowun+Dodum&family=Gamja+Flower&display=swap');
@@ -171,12 +195,11 @@ st.markdown("""
         font-family: 'Gowun Dodum', sans-serif;
         background-color: #FAF8F5;
         color: #4A3E3D;
-        overflow: hidden !important; /* 스크롤바 방지 */
     }
     .block-container {
         max-width: 480px !important;
         padding-top: 0.5rem !important;
-        padding-bottom: 70px !important;
+        padding-bottom: 75px !important;
         padding-left: 0.8rem !important;
         padding-right: 0.8rem !important;
         margin: 0 auto !important;
@@ -226,14 +249,14 @@ st.markdown("""
         margin-bottom: 10px;
     }
     .char-avatar-3d {
-        width: 80px;
-        height: 80px;
-        border-radius: 40px;
+        width: 75px;
+        height: 75px;
+        border-radius: 38px;
         margin: 0 auto 6px auto;
         display: flex;
         align-items: center;
         justify-content: center;
-        font-size: 42px;
+        font-size: 40px;
         box-shadow: 0 4px 14px rgba(120, 100, 80, 0.12);
         border: 3px solid #FFFFFF;
         background: radial-gradient(circle at 30% 30%, #FFFFFF, #F5E8DD);
@@ -421,7 +444,7 @@ st.markdown(f"""
 
 curr_tab = st.session_state.current_nav
 
-# --- 홈 화면 (단일 뷰 압축) ---
+# --- 1. 홈 화면 ---
 if curr_tab == "홈":
     created_date = datetime.datetime.strptime(family["created_at"], "%Y-%m-%d").date()
     days_together = (datetime.date.today() - created_date).days + 1
@@ -473,18 +496,19 @@ if curr_tab == "홈":
     """, unsafe_allow_html=True)
     conn.close()
 
+# --- 2. 질문 화면 (12종 감정 옵션) ---
 elif curr_tab == "질문":
     st.markdown('<div class="hd-card"><div class="hd-card-title">❓ 오늘의 가족 질문</div>', unsafe_allow_html=True)
     today_q = get_today_question()
-    st.markdown(f"<div style='color: #5C4C3E; font-size: 14px; font-weight: bold; margin-bottom: 8px;'>\"{today_q}\"</div>", unsafe_allow_html=True)
+    st.markdown(f'<div style="color: #5C4C3E; font-size: 14px; font-weight: bold; margin-bottom: 8px;">"{today_q}"</div>', unsafe_allow_html=True)
     conn = get_db()
     c = conn.cursor()
     c.execute("SELECT * FROM answers WHERE family_id = ? AND member_id = ? AND question_date = CURRENT_DATE", (family["id"], st.session_state.member_id))
     my_ans = c.fetchone()
     
     with st.form("ans_form"):
-        ans_input = st.text_area("답변 쓰기", value=my_ans["answer_text"] if my_ans else "", height=70)
-        emotion_sel = st.selectbox("감정", ["😊 행복해요", "🥰 고마워요", "😌 편안해요", "💪 힘내요"])
+        ans_input = st.text_area("답변 쓰기", value=my_ans["answer_text"] if my_ans else "", height=70, placeholder="가족에게 남길 이야기")
+        emotion_sel = st.selectbox("오늘의 나의 감정 선택", EMOTION_OPTIONS, index=0)
         submit_ans = st.form_submit_button("등록 (+10 PT)")
         if submit_ans and ans_input.strip():
             emo_icon = emotion_sel.split()[0]
@@ -495,6 +519,21 @@ elif curr_tab == "질문":
                 add_growth_points(family["id"], 10)
             conn.commit()
             st.rerun()
+            
+    st.markdown("---")
+    st.markdown("**오늘 작성된 우리 가족 답변**")
+    c.execute("SELECT a.*, m.title, m.name FROM answers a JOIN members m ON a.member_id = m.id WHERE a.family_id = ? AND a.question_date = CURRENT_DATE", (family["id"],))
+    all_ans = c.fetchall()
+    if all_ans:
+        for row in all_ans:
+            st.markdown(f"""
+            <div style="background: #FFFDF9; border: 1px solid #EFE6DC; padding: 8px 12px; border-radius: 12px; margin-bottom: 6px;">
+                <div style="font-size: 12px; font-weight: bold; color: #7A6855;">{row['title']} ({row['name']}) {row['emotion']}</div>
+                <div style="font-size: 13px; color: #4A3E3D; margin-top: 2px;">{row['answer_text']}</div>
+            </div>
+            """, unsafe_allow_html=True)
+    else:
+        st.info("아직 오늘 답변을 남긴 가족이 없습니다.")
     conn.close()
     st.markdown("</div>", unsafe_allow_html=True)
 
@@ -511,6 +550,12 @@ elif curr_tab == "달력":
             add_growth_points(family["id"], 5)
             conn.commit()
             st.rerun()
+            
+    c.execute("SELECT * FROM calendar_events WHERE family_id = ? ORDER BY event_date ASC LIMIT 5", (family["id"],))
+    events = c.fetchall()
+    if events:
+        for ev in events:
+            st.markdown(f"<div style='font-size:12px; color:#5C4C3E; margin-bottom:4px;'>📌 <b>{ev['event_date']}</b>: {ev['title']}</div>", unsafe_allow_html=True)
     conn.close()
     st.markdown("</div>", unsafe_allow_html=True)
 
@@ -531,30 +576,52 @@ elif curr_tab == "편지":
     conn.close()
     st.markdown("</div>", unsafe_allow_html=True)
 
+# --- 5. 더보기 & 설정 탭 ---
 elif curr_tab == "더보기":
-    st.markdown('<div class="hd-card"><div class="hd-card-title">⭐ 더보기 서비스</div>', unsafe_allow_html=True)
-    sub_tab1, sub_tab2 = st.tabs(["📖 도감", "💓 기분"])
+    st.markdown('<div class="hd-card"><div class="hd-card-title">⚙️ 설정 및 관리</div>', unsafe_allow_html=True)
+    sub_tab1, sub_tab2, sub_tab3 = st.tabs(["📖 도감", "👤 내 설정", "🏡 가족 관리"])
     conn = get_db()
     c = conn.cursor()
+    
     with sub_tab1:
-        st.markdown(f"**현재 우리 가족 펫:** {active_char['name']} ({active_char['type']})")
+        st.markdown(f"**현재 대표 펫:** {active_char['name']} ({active_char['type']})")
         st.caption(active_char['desc'])
+        
     with sub_tab2:
-        with st.form("mood_form"):
-            my_mood = st.selectbox("오늘의 기분", ["😊 행복해요", "👍 괜찮아요", "☕ 지쳐요", "🤗 위로가 필요해요"])
-            m_sub = st.form_submit_button("기분 전송 (+5 PT)")
-            if m_sub:
-                c.execute("INSERT INTO mood_signals (family_id, member_id, mood, note) VALUES (?, ?, ?, '')", (family["id"], st.session_state.member_id, my_mood))
-                add_growth_points(family["id"], 5)
+        st.markdown("**내 프로필 설정**")
+        with st.form("edit_my_profile"):
+            new_title = st.text_input("내 호칭 변경", value=current_member["title"])
+            new_blood = st.selectbox("혈액형 변경", ["A형", "B형", "O형", "AB형"], index=["A형", "B형", "O형", "AB형"].index(current_member["blood_type"]))
+            save_prof = st.form_submit_button("변경 사항 저장")
+            if save_prof:
+                c.execute("UPDATE members SET title = ?, blood_type = ? WHERE id = ?", (new_title.strip(), new_blood, current_member["id"]))
+                c.execute("SELECT blood_type FROM members WHERE family_id = ?", (family["id"],))
+                all_bloods = [r["blood_type"] for r in c.fetchall()]
+                new_char_id = get_character_from_blood_types(all_bloods)
+                c.execute("UPDATE family SET character_id = ? WHERE id = ?", (new_char_id, family["id"]))
                 conn.commit()
+                st.success("정보가 성공적으로 변경되었습니다!")
                 st.rerun()
+                
+    with sub_tab3:
+        st.markdown(f"**가족 공간명:** {family['family_name']}")
+        st.markdown(f"**초대 코드:** `{family['invite_code']}`")
+        st.markdown("**가족 구성원 목록**")
+        for mem in members:
+            st.markdown(f"- **{mem['title']}** ({mem['name']}) | {mem['blood_type']}")
+            
+        if st.button("🚪 가족 공간 나가기"):
+            st.session_state.family_id = None
+            st.session_state.member_id = None
+            st.rerun()
+            
     conn.close()
     st.markdown("</div>", unsafe_allow_html=True)
 
 # 하단 고정 모바일 탭 메뉴
 st.markdown('<div class="nav-anchor"></div>', unsafe_allow_html=True)
 nav_cols = st.columns(5)
-nav_items = [("홈", "🏠"), ("질문", "❓"), ("달력", "📅"), ("편지", "💌"), ("더보기", "⭐")]
+nav_items = [("홈", "🏠"), ("질문", "❓"), ("달력", "📅"), ("편지", "💌"), ("더보기", "⚙️")]
 for idx, (item, icon) in enumerate(nav_items):
     with nav_cols[idx]:
         if st.button(f"{icon} {item}", key=f"nav_btn_{item}", use_container_width=True):
